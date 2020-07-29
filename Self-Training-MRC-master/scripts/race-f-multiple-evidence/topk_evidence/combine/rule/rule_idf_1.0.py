@@ -73,10 +73,10 @@ output_dir = f'/users8/hzyang/proj/c3-master/Self-Training-MRC-master/experiment
 rule_sentence_id_file = '/users8/hzyang/proj/c3-master/data/race/race_c3-sentence_id_rule.json'
 
 
-cmd = f'CUDA_VISIBLE_DEVICES=5,6,7 /users8/hzyang/miniconda3/envs/python36/bin/python /users8/hzyang/proj/c3-master/Self-Training-MRC-master/main_multi_choice_top_k_evidence.py ' \
+cmd = f'CUDA_VISIBLE_DEVICES=5,6 /users8/hzyang/miniconda3/envs/python36/bin/python /users8/hzyang/proj/c3-master/Self-Training-MRC-master/main_multi_choice_top_k_evidence.py ' \
     f'--bert_model {model_name}  --vocab_file {bert_base_vocab} --model_file {bert_base_model} --output_dir {output_dir} --predict_dir {output_dir} ' \
     f'--train_file {train_file} --predict_file {dev_file} --test_file {test_file} ' \
-    f'--max_seq_length 512 --train_batch_size 10 --predict_batch_size 5 ' \
+    f'--max_seq_length 512 --train_batch_size 4 --predict_batch_size 2 ' \
     f'--learning_rate {learning_rate} --num_train_epochs {num_train_epochs} ' \
     f' --gradient_accumulation_steps 2 --per_eval_step 1000 ' \
     f'--bert_name {bert_name} --task_name {task_name} --reader_name {reader_name} ' \
@@ -90,5 +90,6 @@ run_cmd(cmd)
 
 '''
 python /users8/hzyang/proj/c3-master/Self-Training-MRC-master/scripts/race-f-multiple-evidence/topk_evidence/combine/rule/rule_idf_1.0.py
+
 
 '''

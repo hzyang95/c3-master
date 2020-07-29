@@ -517,17 +517,24 @@ class BertRACEHierarchicalTopK(BertPreTrainedModel):
         self.apply(self.init_bert_weights)
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None, sentence_span_list=None,
-                sentence_ids=None, max_sentences: int = 0):
+                sentence_ids=None, max_sentences: int = 0,sentence_start=None, sentence_end=None):
+
         flat_input_ids = input_ids.view(-1, input_ids.size(-1))
         flat_token_type_ids = token_type_ids.view(-1, token_type_ids.size(-1)) if token_type_ids is not None else None
         flat_attention_mask = attention_mask.view(-1, attention_mask.size(-1)) if attention_mask is not None else None
+        flat_sentence_start = sentence_start.view(-1, sentence_start.size(-1)) if sentence_start is not None else None
+        flat_sentence_end = sentence_end.view(-1, sentence_end.size(-1)) if sentence_end is not None else None
+
+        # print(flat_input_ids.size(), flat_sentence_start.size())
+
         seq_output, pool_output = self.bert(flat_input_ids, flat_token_type_ids, flat_attention_mask, output_all_encoded_layers=False)
+
 
         # mask: 1 for masked value and 0 for true value
         # doc, que, doc_mask, que_mask = layers.split_doc_que(sequence_output, token_type_ids, attention_mask)
         doc_sen, que, doc_sen_mask, que_mask, sentence_mask = \
             rep_layers.split_doc_sen_que(seq_output, flat_token_type_ids, flat_attention_mask, sentence_span_list,
-                                         max_sentences=max_sentences)
+                                         max_sentences=max_sentences, sentence_start=flat_sentence_start, sentence_end=flat_sentence_end)
         # doc_sen_mask = 1 - doc_sen_mask
         # que_mask = 1 - que_mask
         # sentence_mask = 1 - sentence_mask
@@ -555,9 +562,9 @@ class BertRACEHierarchicalTopK(BertPreTrainedModel):
             output_dict = {}
         else:
             output_dict = {
-                'choice_logits': torch.softmax(choice_logits, dim=-1).detach().cpu().float(),
-                'sentence_logits': sentence_sim.reshape(choice_logits.size(0), self.num_choices, max_sen).detach().cpu().float(),
-                'sentence_mask': sentence_mask.reshape(choice_logits.size(0), self.num_choices, max_sen).detach().cpu().float()
+                'choice_logits': torch.softmax(choice_logits, dim=-1).detach().float(),
+                'sentence_logits': sentence_sim.reshape(choice_logits.size(0), self.num_choices, max_sen).detach().float(),
+                'sentence_mask': sentence_mask.reshape(choice_logits.size(0), self.num_choices, max_sen).detach().float()
             }
 
         if labels is not None:
@@ -569,6 +576,7 @@ class BertRACEHierarchicalTopK(BertPreTrainedModel):
                 loss += self.evidence_lam * sentence_loss
                 # output_dict['sentence_loss'] = sentence_loss
             output_dict['loss'] = loss
+        # print(output_dict)
         return output_dict
 
     @staticmethod

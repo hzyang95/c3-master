@@ -38,35 +38,50 @@ class RACEMultipleReader(object):
                 return True
             return False
 
+        ms = 0
         examples = []
         for instance in tqdm(input_data):
             passage = instance['article']
+            if '3' in input_file:
+                passage = ''.join([i for i in list(passage) if i.strip()])
             article_id = instance['id']
 
-            doc_tokens = []
-            prev_is_whitespace = True
-            char_to_word_offset = []
-            for c in passage:
-                if is_whitespace(c):
-                    prev_is_whitespace = True
-                else:
-                    if prev_is_whitespace:
-                        doc_tokens.append(c)
+            if '3' in input_file:
+                doc_tokens = list(passage)
+            else:
+                doc_tokens = []
+                prev_is_whitespace = True
+                char_to_word_offset = []
+                for c in passage:
+                    if is_whitespace(c):
+                        prev_is_whitespace = True
                     else:
-                        doc_tokens[-1] += c
-                    prev_is_whitespace = False
-                char_to_word_offset.append(len(doc_tokens) - 1)
+                        if prev_is_whitespace:
+                            doc_tokens.append(c)
+                        else:
+                            doc_tokens[-1] += c
+                        prev_is_whitespace = False
+                    char_to_word_offset.append(len(doc_tokens) - 1)
 
             # Split context into sentences
             if '3' in input_file:
                 sentence_start_list, sentence_end_list = utils.split_sentence_chinese(passage, SentenceSplitter)
+                sentence_span_list = []
+                for c_start, c_end in zip(sentence_start_list, sentence_end_list):
+                    sentence_span_list.append((c_start, c_end))
             else:
                 sentence_start_list, sentence_end_list = utils.split_sentence(passage, self.sentence_tokenizer)
-            sentence_span_list = []
-            for c_start, c_end in zip(sentence_start_list, sentence_end_list):
-                t_start = char_to_word_offset[c_start]
-                t_end = char_to_word_offset[c_end]
-                sentence_span_list.append((t_start, t_end))
+                sentence_span_list = []
+                for c_start, c_end in zip(sentence_start_list, sentence_end_list):
+                    t_start = char_to_word_offset[c_start]
+                    t_end = char_to_word_offset[c_end]
+                    sentence_span_list.append((t_start, t_end))
+
+            # if len(sentence_span_list) > 80:
+            #     print(len(doc_tokens))
+            #     print(doc_tokens)
+            #     sentence_span_list=sentence_span_list[:80]
+            #     doc_tokens=doc_tokens[:sentence_span_list[-1][1]]
 
             questions = instance['questions']
             answers = list(map(lambda x: {'A': 0, 'B': 1, 'C': 2, 'D': 3}[x], instance['answers']))
@@ -74,6 +89,7 @@ class RACEMultipleReader(object):
 
             for q_id, (question, answer, option_list) in enumerate(zip(questions, answers, options)):
                 qas_id = f"{article_id}--{q_id}"
+                ms = max(ms, len(sentence_span_list))
                 example = MultiChoiceFullExample(
                     qas_id=qas_id,
                     question_text=question,
@@ -85,15 +101,20 @@ class RACEMultipleReader(object):
                 examples.append(example)
 
         logger.info('Finish reading {} examples from {}'.format(len(examples), input_file))
+
+        self.data_state_dict['max_sentences'] = ms
+        print(self.data_state_dict['max_sentences'])
         return examples
 
     @staticmethod
     def convert_examples_to_features(examples: List[MultiChoiceFullExample], tokenizer, max_seq_length: int = 512):
         unique_id = 1000000000
         features = []
-        for (example_index, example) in tqdm(enumerate(examples[:10]), desc='Convert examples to features', total=len(examples)):
+
+        for (example_index, example) in tqdm(enumerate(examples[:]), desc='Convert examples to features',
+                                             total=len(examples)):
             query_tokens = tokenizer.tokenize(example.question_text)
-            print(query_tokens)
+            # print(query_tokens)
             # word piece index -> token index
             tok_to_orig_index = []
             # token index -> word pieces group start index
@@ -107,10 +128,10 @@ class RACEMultipleReader(object):
                     tok_to_orig_index.append(i)
                     all_doc_tokens.append(sub_token)
 
-            print(example.doc_tokens)
+            # print(example.doc_tokens)
             # print(orig_to_tok_index)
             # print(tok_to_orig_index)
-            print(all_doc_tokens)
+            # print(all_doc_tokens)
 
             # Process sentence span list
             sentence_spans = []
@@ -122,7 +143,7 @@ class RACEMultipleReader(object):
                     piece_end = len(all_doc_tokens) - 1
                 sentence_spans.append((piece_start, piece_end))
 
-            print(sentence_spans)
+            # print(sentence_spans)
 
             options = example.options
             choice_features = []
@@ -139,10 +160,12 @@ class RACEMultipleReader(object):
                 sentence_list = []
                 doc_offset = len(q_op_tokens) + 2
 
-                print(doc_offset)
+                sent_start = []
+                sent_end = []
+                # print(doc_offset)
 
                 for (start, end) in sentence_spans:
-                    assert start <= end
+                    assert start <= end ,(start,end)
                     if start >= len(doc_tokens):
                         break
                     if end >= len(doc_tokens):
@@ -150,6 +173,8 @@ class RACEMultipleReader(object):
                     start = doc_offset + start
                     end = doc_offset + end
                     sentence_list.append((start, end))
+                    sent_start.append(start)
+                    sent_end.append(end)
                     assert start < max_seq_length and end < max_seq_length
 
                 input_ids = tokenizer.convert_tokens_to_ids(tokens)
@@ -165,13 +190,15 @@ class RACEMultipleReader(object):
                 assert len(input_mask) == max_seq_length
                 assert len(segment_ids) == max_seq_length
 
-                print(sentence_list)
+                # print(sentence_list)
 
                 choice_features.append({
                     "input_ids": input_ids,
                     "input_mask": input_mask,
                     "segment_ids": segment_ids,
-                    "sentence_span_list": sentence_list
+                    "sentence_span_list": sentence_list,
+                    'sent_start': sent_start,
+                    'sent_end': sent_end
                 })
             features.append(MultiChoiceFullFeature(
                 example_index=example_index,
@@ -264,7 +291,8 @@ class RACEMultipleReader(object):
         logger.info("Predicting sentence id to: %s" % output_prediction_file)
         logger.info("Weight threshold: {}".format(weight_threshold))
         logger.info("Use ids with true yes/no prediction only: {}".format(only_correct))
-        logger.info("Evidence prediction probability threshold : {}, only make sense while only_correct=True.".format(label_threshold))
+        logger.info("Evidence prediction probability threshold : {}, only make sense while only_correct=True.".format(
+            label_threshold))
 
         example_index_to_features = collections.defaultdict(list)
         for feature in all_features:
@@ -300,7 +328,8 @@ class RACEMultipleReader(object):
                 b += 1
 
             sentence_ids = []
-            if (only_correct and choice_prediction == example.answer and choice_prob > label_threshold) or not only_correct:
+            if (
+                    only_correct and choice_prediction == example.answer and choice_prob > label_threshold) or not only_correct:
                 for choice_evidence in evidence_list:
                     # weight_cnt[choice_evidence['value']] += 1
                     if choice_evidence['value'] > weight_threshold:
@@ -340,16 +369,24 @@ class RACEMultipleReader(object):
         for feature in all_features:
             choice_features = feature.choice_features
             max_sentence_num = max(max_sentence_num, max(map(lambda x: len(x["sentence_span_list"]), choice_features)))
-        self.data_state_dict['max_sentences'] = max_sentence_num
-
-        all_input_ids = torch.LongTensor([[choice["input_ids"] for choice in feature.choice_features] for feature in all_features])
-        all_input_mask = torch.LongTensor([[choice["input_mask"] for choice in feature.choice_features] for feature in all_features])
-        all_segment_ids = torch.LongTensor([[choice["segment_ids"] for choice in feature.choice_features] for feature in all_features])
+        # self.data_state_dict['max_sentences'] = max_sentence_num
+        # print(max_sentence_num)
+        all_input_ids = torch.LongTensor(
+            [[choice["input_ids"] for choice in feature.choice_features] for feature in all_features])
+        all_input_mask = torch.LongTensor(
+            [[choice["input_mask"] for choice in feature.choice_features] for feature in all_features])
+        all_segment_ids = torch.LongTensor(
+            [[choice["segment_ids"] for choice in feature.choice_features] for feature in all_features])
         all_answers = torch.LongTensor([feature.answer for feature in all_features])
 
+        all_sent_start = torch.LongTensor(
+            [[choice["sent_start"]+[-1]*(self.data_state_dict['max_sentences']-len(choice["sent_start"])) for choice in feature.choice_features] for feature in all_features])
+
+        all_sent_end = torch.LongTensor(
+            [[choice["sent_end"]+[-1]*(self.data_state_dict['max_sentences']-len(choice["sent_end"])) for choice in feature.choice_features] for feature in all_features])
         all_feature_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
 
-        return all_input_ids, all_segment_ids, all_input_mask, all_answers, all_feature_index
+        return all_input_ids, all_segment_ids, all_input_mask, all_answers, all_sent_start, all_sent_end, all_feature_index
 
     def generate_inputs(self, batch: Tuple, all_features: List[MultiChoiceFullFeature], model_state):
         assert model_state in ModelState
@@ -358,20 +395,55 @@ class RACEMultipleReader(object):
         sentence_span_list = []
         sentence_ids = []
         # For convenience
-        for feature in batch_features:
-            sentence_span_list.extend([choice["sentence_span_list"] for choice in feature.choice_features])
-        # assert len(sentence_span_list) == len(batch_features) * 4
+        sentence_start = []
+        sentence_end = []
 
+        for feature in batch_features:
+            arr = [choice["sentence_span_list"] for choice in feature.choice_features]
+            sentence_span_list.extend(arr)
+
+            # print()
+        # assert len(sentence_span_list) == len(batch_features) * 4
+        # print('sentence_span_list-----------',sentence_span_list)
         if "sentence_ids" in batch_features[0].choice_features[0]:
             for feature in batch_features:
                 sentence_ids.extend([choice["sentence_ids"] for choice in feature.choice_features])
         # print(sentence_span_list)
+
+        mx = 0
+        for di, sent in enumerate(sentence_span_list):
+            mx = max(mx, len(sent))
+            sentence_start.append([s for (s, e) in sent])
+            sentence_end.append([e for (s, e) in sent])
+
+        # print(sentence_start)
+        # print(sentence_end)
+        #
+        # print(len(batch))
+        # print(len(batch[0]))
+        # print(len(sentence_span_list))
+
+        sent_start = -1 * torch.ones(len(sentence_span_list), mx, dtype=torch.long)
+        sent_end = -1 * torch.ones(len(sentence_span_list), mx, dtype=torch.long)
+
+        for di in range(len(sentence_span_list)):
+            sent_start[di, :len(sentence_start[di])] = torch.tensor(sentence_start[di])
+            sent_end[di, :len(sentence_end[di])] = torch.tensor(sentence_end[di])
+        # print(sentence_span_list)
+        # print(batch[0])
+        # print(sent_start)
+        # print(sent_end)
+        # sent_start = torch.LongTensor(sentence_start)
+        # sent_end = torch.LongTensor(sentence_end)
+        # print(batch[0].size(), sent_start.size())
         inputs = {
             "input_ids": batch[0],
             "token_type_ids": batch[1],
             "attention_mask": batch[2],
             "sentence_span_list": sentence_span_list,
-            "max_sentences": self.data_state_dict['max_sentences']
+            "max_sentences": self.data_state_dict['max_sentences'],
+            "sentence_start": batch[4],
+            "sentence_end": batch[5]
         }
         if model_state == ModelState.Test:
             return inputs

@@ -67,7 +67,8 @@ class RNNDropout(nn.Module):
 @Seq2SeqEncoder.register("concat_rnn")
 class ConcatRNN(Seq2SeqEncoder):
 
-    def __init__(self, input_size, hidden_size, num_layers, bidirectional=True, rnn_type="GRU", stateful=False, batch_first=True):
+    def __init__(self, input_size, hidden_size, num_layers, bidirectional=True, rnn_type="GRU", stateful=False,
+                 batch_first=True):
         super().__init__(stateful=stateful)
         self.input_dim = input_size
         self.output_dim = num_layers * (hidden_size * 2 if bidirectional else hidden_size)
@@ -432,7 +433,7 @@ def masked_log_softmax(vector: torch.Tensor, mask: torch.Tensor, dim: int = -1) 
 
 
 def split_doc_sen_que(hidden_state, token_type_ids, attention_mask, sentence_span_list, return_cls: bool = False,
-                      max_sentences: int = 0):
+                      max_sentences: int = 0, sentence_start=None, sentence_end=None):
     batch, seq_len, hidden_size = hidden_state.size()
     cls_h = hidden_state[:, 0]
 
@@ -442,30 +443,61 @@ def split_doc_sen_que(hidden_state, token_type_ids, attention_mask, sentence_spa
     max_doc_len = 0
     # Use the setting of global max_sentences.
     # max_sentences = 0
+    # print('-------sentence_span_list', sentence_span_list)
+    # print(batch)
+    # print(str(attention_mask.device), str(token_type_ids.device))
+    # print(len(sentence_span_list))
+    # for b in range(batch):
+    #     print(torch.sum(attention_mask[b, :]).item(), torch.sum(token_type_ids[b, :]).item())
+    # extra = 0
+    # if '0' <= str(attention_mask.device)[-1] <= '9':
+    #     xh = int(str(attention_mask.device)[5:])
+    #     if xh == torch.cuda.device_count() - 1:
+    #         extra = -1 * batch
+    #     else:
+    #         extra = batch * xh
+    # print(extra)
+    # print(sentence_start.size(), sentence_end.size(),token_type_ids.size())
     for b in range(batch):
-
-        unmasked_len = torch.sum(attention_mask[b]).item()
+        unmasked_len = torch.sum(attention_mask[b, :]).item()
         # doc + [SEP]
-        doc_len = torch.sum(token_type_ids[b]).item()
+        doc_len = torch.sum(token_type_ids[b, :]).item()
         # [CLS] + query + [SEP]
         que_len = unmasked_len - doc_len
 
         que_hidden_list.append(hidden_state[b, 1:(que_len - 1)])
         max_que_len = max(max_que_len, que_len - 2)
-
-        print(attention_mask[b],token_type_ids[b],hidden_state[b],sentence_span_list[b])
+        # print(b, unmasked_len, doc_len, que_len)
+        # print('attention_mask',attention_mask[b])
+        # print('token_type_ids',token_type_ids[b])
+        # print('hidden_state',hidden_state[b])
+        # print('sentence_span_list',sentence_span_list[b])
 
         # doc_hidden = hidden_state[b, que_len:(que_len + doc_len - 1)]
         doc_sentence_list = []
-        for (sen_start, sen_end) in sentence_span_list[b]:
-            print(sen_start,sen_end,que_len)
-            assert sen_start >= que_len, (sen_start, que_len)
-            assert sen_end < seq_len
-            sentence = hidden_state[b, sen_start: (sen_end + 1)]
-            max_doc_len = max(max_doc_len, sen_end - sen_start + 1)
-            doc_sentence_list.append(sentence)
-        max_sentences = max(max_sentences, len(doc_sentence_list))
-        doc_hidden_list.append(doc_sentence_list)
+        if sentence_start is None:
+            for (sen_start, sen_end) in sentence_span_list[b]:
+                # print(sen_start, sen_end, que_len)
+                assert sen_start >= que_len, (sen_start, que_len)
+                assert sen_end < seq_len
+                sentence = hidden_state[b, sen_start: (sen_end + 1)]
+                max_doc_len = max(max_doc_len, sen_end - sen_start + 1)
+                doc_sentence_list.append(sentence)
+            max_sentences = max(max_sentences, len(doc_sentence_list))
+            doc_hidden_list.append(doc_sentence_list)
+        else:
+
+            for (sen_start, sen_end) in zip(sentence_start[b], sentence_end[b]):
+                # print(sen_start, sen_end, que_len)
+                if sen_start == -1:
+                    break
+                assert sen_start >= que_len, (sen_start, que_len)
+                assert sen_end < seq_len
+                sentence = hidden_state[b, sen_start: (sen_end + 1)]
+                max_doc_len = max(max_doc_len, sen_end - sen_start + 1)
+                doc_sentence_list.append(sentence)
+            max_sentences = max(max_sentences, len(doc_sentence_list))
+            doc_hidden_list.append(doc_sentence_list)
 
     doc_rep = hidden_state.new_zeros(batch, max_sentences, max_doc_len, hidden_size)
     doc_mask = attention_mask.new_zeros(batch, max_sentences, max_doc_len)
@@ -498,7 +530,8 @@ def split_doc_sen_que(hidden_state, token_type_ids, attention_mask, sentence_spa
     return output
 
 
-def split_doc_sen_que_roberta(hidden_state, token_type_ids, attention_mask, sentence_span_list, return_cls: bool = False,
+def split_doc_sen_que_roberta(hidden_state, token_type_ids, attention_mask, sentence_span_list,
+                              return_cls: bool = False,
                               max_sentences: int = 0):
     batch, seq_len, hidden_size = hidden_state.size()
     cls_h = hidden_state[:, 0]

@@ -225,17 +225,19 @@ def main():
             args.bert_model, str(args.max_seq_length), str(args.doc_stride), str(args.max_query_length), str(args.max_ctx),
             str(args.task_name))
 
-        try:
-            with open(cached_train_features_file, "rb") as reader:
-                train_features = pickle.load(reader)
-        except FileNotFoundError:
-            train_features = data_reader.convert_examples_to_features(examples=train_examples, tokenizer=tokenizer,
-                                                                      max_seq_length=args.max_seq_length)
-            if args.local_rank == -1 or torch.distributed.get_rank() == 0:
-                logger.info("  Saving train features into cached file %s", cached_train_features_file)
-                with open(cached_train_features_file, "wb") as writer:
-                    pickle.dump(train_features, writer)
+        # try:
+        #     with open(cached_train_features_file, "rb") as reader:
+        #         train_features = pickle.load(reader)
+        # except FileNotFoundError:
+        #     train_features = data_reader.convert_examples_to_features(examples=train_examples, tokenizer=tokenizer,
+        #                                                               max_seq_length=args.max_seq_length)
+        #     if args.local_rank == -1 or torch.distributed.get_rank() == 0:
+        #         logger.info("  Saving train features into cached file %s", cached_train_features_file)
+        #         with open(cached_train_features_file, "wb") as writer:
+        #             pickle.dump(train_features, writer)
 
+        train_features = data_reader.convert_examples_to_features(examples=train_examples, tokenizer=tokenizer,
+                                                                  max_seq_length=args.max_seq_length)
         num_train_steps = int(len(train_features) / args.train_batch_size / args.gradient_accumulation_steps * args.num_train_epochs)
 
     # Prepare model
@@ -351,9 +353,10 @@ def main():
             # Train
             for step, batch in enumerate(tqdm(train_dataloader, desc="Iteration", dynamic_ncols=True)):
                 model.train()
-                if n_gpu == 1:
+                if n_gpu >= 1:
                     batch = batch_to_device(batch, device)  # multi-gpu does scattering it-self
                 inputs = data_reader.generate_inputs(batch, train_features, model_state=ModelState.Train)
+                # print(inputs)
                 model_output = model(**inputs)
                 loss = model_output['loss']
                 # print(loss)
@@ -390,10 +393,11 @@ def main():
                     model.eval()
                     logger.info("Start evaluating")
                     for _, eval_batch in enumerate(tqdm(eval_dataloader, desc="Evaluating", dynamic_ncols=True)):
-                        if n_gpu == 1:
+                        if n_gpu >= 1:
                             eval_batch = batch_to_device(eval_batch, device)  # multi-gpu does scattering it-self
                         inputs = data_reader.generate_inputs(eval_batch, eval_features, model_state=ModelState.Evaluate)
                         with torch.no_grad():
+                            # print(inputs)
                             output_dict = model(**inputs)
                             loss, choice_logits = output_dict['loss'], output_dict['choice_logits']
                             # print(loss)

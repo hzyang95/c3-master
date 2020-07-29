@@ -58,12 +58,12 @@ output_dir = f'/users8/hzyang/proj/c3-master/Self-Training-MRC-master/experiment
 rule_sentence_id_file = '/users8/hzyang/proj/c3-master/Self-Training-MRC-master/experiments/race/topk-evidence/high' \
                         '/rule/sentence_id_rule1.0-70000-2.json '
 
-cmd = f'CUDA_VISIBLE_DEVICES=5,6,7 /users8/hzyang/miniconda3/envs/python36/bin/python /users8/hzyang/proj/c3-master/Self-Training-MRC-master/main_multi_choice_top_k_evidence.py --bert_model bert-base-uncased ' \
+cmd = f'CUDA_VISIBLE_DEVICES=4,6 /users8/hzyang/miniconda3/envs/python36/bin/python /users8/hzyang/proj/c3-master/Self-Training-MRC-master/main_multi_choice_top_k_evidence.py --bert_model bert-base-uncased ' \
     f'--vocab_file {bert_base_vocab} --model_file {bert_base_model} --output_dir {output_dir} --predict_dir {output_dir} ' \
     f'--train_file {train_file} --predict_file {dev_file} --test_file {test_file} ' \
-    f'--max_seq_length 380 --train_batch_size 2 --predict_batch_size 2 ' \
+    f'--max_seq_length 380 --train_batch_size 20 --predict_batch_size 5 ' \
     f'--learning_rate {learning_rate} --num_train_epochs {num_train_epochs} ' \
-    f' --gradient_accumulation_steps 1 --per_eval_step 3000 ' \
+    f' --gradient_accumulation_steps 5 --per_eval_step 3000 ' \
     f'--bert_name {bert_name} --task_name {task_name} --reader_name {reader_name} ' \
     f'--metric {metric} ' \
     f'--do_label --sentence_id_file {rule_sentence_id_file} --evidence_lambda 0.8 '
